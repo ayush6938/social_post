@@ -117,7 +117,7 @@ async function generatePost() {
     document.getElementById("output").innerText = "";
     document.getElementById("copyBtn").style.display = "none";
 
-    const response = await fetch("http://127.0.0.1:8000/generate-post", {
+    const response = await fetch("https://social-post-83jw.onrender.com/generate-post", {
         method: "POST",
         headers: {
             "Content-Type": "application/json"
@@ -145,7 +145,7 @@ function copyPost() {
 }
 
 async function loadHistory() {
-    const response = await fetch("http://127.0.0.1:8000/posts");
+    const response = await fetch("https://social-post-83jw.onrender.com/generate-post");
     const data = await response.json();
 
     let historyHTML = "";
