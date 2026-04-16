@@ -44,6 +44,7 @@ class RequestData(BaseModel):
 # Generate post
 @app.post("/generate-post")
 def generate_post(data: RequestData):
+    topic = data.topic
     if not data.topic.strip():
         return {
             "success": False,
@@ -60,11 +61,13 @@ def generate_post(data: RequestData):
                 "cached": True
             }
         }
+    post = None
+    score = 0
 
     for i in range(3):
         try:
             prompt = f"""
-            Generate a HIGHLY engaging LinkedIn post on the topic
+            Generate a HIGHLY engaging LinkedIn post on the topic: "{topic}"
 
             Rules:
             - First line must be a strong hook (curiosity/emotion)
@@ -74,7 +77,7 @@ def generate_post(data: RequestData):
             - Add a personal tone
             - Add 1 relatable insight
             - End with a call-to-action (question or thought)
-
+            
             Topic: {data.topic}
 
             Format:
@@ -144,8 +147,13 @@ def generate_post(data: RequestData):
                 "message": f"Server error: {str(e)}",
                 "data": None
             }
-
-    # Save to MongoDB
+    if not post:
+        return {
+            "success": False,
+            "message": "Failed to generate valid post",
+            "data": None
+        }
+        # Save to MongoDB
     collection.insert_one({
         "topic": data.topic,
         "post": post,
