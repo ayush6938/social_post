@@ -67,26 +67,23 @@ def generate_post(data: RequestData):
     for i in range(3):
         try:
             prompt = f"""
-            Generate a HIGHLY engaging LinkedIn post on the topic: "{topic}"
+You are a professional LinkedIn content writer.
 
-            Rules:
-            - First line must be a strong hook (curiosity/emotion)
-            - Use short sentences
-            - Use line breaks (very important)
-            - Write like a human, not AI
-            - Add a personal tone
-            - Add 1 relatable insight
-            - End with a call-to-action (question or thought)
-            
-            Topic: {data.topic}
+Return output in STRICT JSON format:
 
-            Format:
-            Return ONLY this JSON:
-            {{
-                "post": "...",
-                "score": number (0-100 based on virality)
-            }}
-            """
+{{
+  "post": "clean linkedin post without markdown or special characters",
+  "score": number between 0 and 100
+}}
+
+Rules:
+- No bold, no emojis, no extra formatting
+- No explanation
+- Only valid JSON
+- Post should be engaging and professional
+
+Topic: {data.topic}
+"""
 
             response = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
