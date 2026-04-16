@@ -45,6 +45,8 @@ class RequestData(BaseModel):
 @app.post("/generate-post")
 def generate_post(data: RequestData):
     topic = data.topic
+    post = None
+    score = 0
     if not data.topic.strip():
         return {
             "success": False,
@@ -61,8 +63,6 @@ def generate_post(data: RequestData):
                 "cached": True
             }
         }
-    post = None
-    score = 0
 
     for i in range(3):
         try:
