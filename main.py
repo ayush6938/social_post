@@ -44,6 +44,7 @@ class RequestData(BaseModel):
 # Generate post
 @app.post("/generate-post")
 def generate_post(data: RequestData):
+    topic = data.topic
     if not data.topic.strip():
         return {
             "success": False,
