@@ -44,7 +44,6 @@ class RequestData(BaseModel):
 # Generate post
 @app.post("/generate-post")
 def generate_post(data: RequestData):
-    topic = data.topic
     if not data.topic.strip():
         return {
             "success": False,
@@ -65,7 +64,7 @@ def generate_post(data: RequestData):
     for i in range(3):
         try:
             prompt = f"""
-            Generate a HIGHLY engaging LinkedIn post on the topic: "{topic}"
+            Generate a HIGHLY engaging LinkedIn post on the topic
 
             Rules:
             - First line must be a strong hook (curiosity/emotion)
@@ -75,6 +74,8 @@ def generate_post(data: RequestData):
             - Add a personal tone
             - Add 1 relatable insight
             - End with a call-to-action (question or thought)
+
+            Topic: {data.topic}
 
             Format:
             Return ONLY this JSON:
