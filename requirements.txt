@@ -4,3 +4,5 @@ pymongo
 requests
 certifi
 groq
+passlib[bcrypt]
+python-jose
