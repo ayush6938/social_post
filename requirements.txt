@@ -6,3 +6,4 @@ certifi
 groq
 passlib[bcrypt]
 python-jose
+python-dotenv
