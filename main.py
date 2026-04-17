@@ -1,31 +1,56 @@
-from fastapi import FastAPI
-from pydantic import BaseModel, Field
-from groq import Groq
-from pymongo import MongoClient
-import certifi
-import json
-import logging
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import os
+from models.request import RequestData
+from services.generator import generate_post
+from db.mongo import collection
+import logging
+from fastapi.responses import JSONResponse
+from fastapi.requests import Request
+from fastapi.exceptions import HTTPException
+from models.response import APIResponse
+from fastapi import HTTPException
+from bson import ObjectId
+from fastapi.responses import FileResponse
+import json
+from auth import hash_password, create_token
+from auth import verify_password
+from fastapi import Header, HTTPException
+from jose import jwt
+from config import SECRET_KEY, ALGORITHM
 
-cache = {}
+
+user_collection = collection
 
 # Logging setup
-logging.basicConfig(level=logging.INFO)
-
-# MongoDB connection
-client_mongo = MongoClient(
-    os.getenv("MONGO_URL"),
-    tls=True,
-    tlsCAFile=certifi.where(),
-    tlsAllowInvalidCertificates=True
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
 )
-
-db = client_mongo["ai_database"]
-collection = db["posts"]
 
 # FastAPI app
 app = FastAPI()
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={
+            "success": False,
+            "message": str(exc),
+            "data": None
+        }
+    )
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "success": False,
+            "message": exc.detail,
+            "data": None
+        }
+    )
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # allow all (for now)
@@ -34,145 +59,52 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Groq client
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    logging.info(f"Request: {request.method} {request.url}")
 
-# Request schema
-class RequestData(BaseModel):
-    topic: str = Field(min_length=3, max_length=50)
+    response = await call_next(request)
+
+    logging.info(f"Response Status: {response.status_code}")
+
+    return response
+
+@app.post("/signup")
+def signup(data: RequestData):
+    user = {
+        "username": data.topic,  # reuse for now
+        "password": hash_password("1234")  # demo
+    }
+    user_collection.insert_one(user)
+
+    return {"message": "User created"}
+
+@app.post("/login")
+def login(data: RequestData):
+    user = user_collection.find_one({"username": data.topic})
+
+    if not user:
+        return {"error": "User not found"}
+
+    if not verify_password("1234", user["password"]):
+        return {"error": "Wrong password"}
+
+    token = create_token({"sub": data.topic})
+
+    return {"access_token": token}
+
+def verify_token(token: str):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return payload["sub"]
+    except:
+        raise HTTPException(status_code=401, detail="Invalid token")
 
 # Generate post
 @app.post("/generate-post")
-def generate_post(data: RequestData):
-    topic = data.topic
-    post = None
-    score = 0
-    if not data.topic.strip():
-        return {
-            "success": False,
-            "message": "Topic cannot be empty",
-            "data": None
-        }
-        
-    if data.topic in cache:
-        return {
-            "success": True,
-            "message": "Returned from cache",
-            "data": cache[data.topic],
-            "meta": {
-                "cached": True
-            }
-        }
-
-    for i in range(3):
-        try:
-            prompt = f"""
-You are a professional LinkedIn content writer.
-
-Return output in STRICT JSON format:
-
-{{
-  "post": "clean linkedin post without markdown or special characters",
-  "score": number between 0 and 100
-}}
-
-Rules:
-- No bold, no emojis, no extra formatting
-- No explanation
-- Only valid JSON
-- Post should be engaging and professional
-
-Topic: {data.topic}
-"""
-
-            response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[
-                    {"role": "system", "content": "You are a LinkedIn content writer"},
-                    {"role": "user", "content": prompt}
-                ]
-            )
-
-            content = response.choices[0].message.content
-
-            # Debug log (see raw AI output if needed)
-            logging.info(f"Raw AI Response: {content}")
-
-            # Parse JSON
-            try:
-                parsed = json.loads(content)
-            except Exception as e:
-                logging.error(f"JSON Parsing Error: {content}")
-                continue
-
-            # Validate structure
-            if not isinstance(parsed, dict):
-                continue
-
-            post = parsed.get("post")
-            score = parsed.get("score")
-
-            # Validate types
-            if not isinstance(post, str):
-                continue
-
-            try:
-                score = int(score)
-            except:
-                continue
-
-            # Validate content
-            if not post or len(post.strip()) < 50:
-                continue
-
-            logging.info(f"Attempt {i+1} | Score: {score}")
-
-            # Accept only high-quality
-            if score >= 80:
-                break
-            else:
-                if i == 2:
-                    return {
-                        "success": False,
-                        "message": "Failed to generate high-quality content",
-                        "data": None
-                    }
-
-        except Exception as e:
-            return {
-                "success": False,
-                "message": f"Server error: {str(e)}",
-                "data": None
-            }
-    if not post:
-        return {
-            "success": False,
-            "message": "Failed to generate valid post",
-            "data": None
-        }
-        # Save to MongoDB
-    collection.insert_one({
-        "topic": data.topic,
-        "post": post,
-        "score": score
-    })
-
-    result = {
-        "topic": data.topic,
-        "post": post,
-        "score": score
-    }
-
-    cache[data.topic] = result
-    return {
-        "success": True,
-        "message": "Post generated successfully",
-        "data": result,
-        "meta": {
-            "attempts": i + 1,
-            "cached": False
-        }
-    }
+def generate_post_api(data: RequestData):
+    result = generate_post(data.topic)
+    return result
 
 # Get all posts
 @app.get("/posts")
@@ -194,3 +126,108 @@ def topic1(topic: str):
         {"topic": topic},
         {"_id": 0}
     ))
+
+@app.post("/favorite/{post_id}")
+def mark_favorite(post_id: str):
+    result = collection.update_one(
+        {"_id": ObjectId(post_id)},
+        {"$set": {"favorite": True}}
+    )
+
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    return {
+        "success": True,
+        "message": "Marked as favorite",
+        "data": {"post_id": post_id}
+    }
+
+@app.get("/favorites")
+def get_favorites():
+    posts = list(collection.find({"favorite": True}))
+
+    for p in posts:
+        p["_id"] = str(p["_id"])
+
+    return {
+        "success": True,
+        "message": "Favorite posts",
+        "data": posts
+    }
+
+@app.post("/unfavorite/{post_id}")
+def unmark_favorite(post_id: str):
+    collection.update_one(
+        {"_id": ObjectId(post_id)},
+        {"$set": {"favorite": False}}
+    )
+
+    return {
+        "success": True,
+        "message": "Removed from favorites",
+        "data": {"post_id": post_id}
+    }
+
+@app.get("/export")
+def export_posts():
+    posts = list(collection.find({}, {"_id": 0}))
+
+    # Save to file
+    file_path = "posts.json"
+    with open(file_path, "w") as f:
+        json.dump(posts, f, indent=4)
+
+    return FileResponse(
+        path=file_path,
+        filename="posts.json",
+        media_type="application/json"
+    )
+
+@app.get("/search")
+def search_posts(query: str):
+    posts = list(collection.find(
+        {"topic": {"$regex": query, "$options": "i"}},
+        {"_id": 0}
+    ))
+    return posts
+
+@app.get("/analytics")
+def get_analytics():
+    posts = list(collection.find())
+
+    total = len(posts)
+
+    if total == 0:
+        return {
+            "total_posts": 0,
+            "avg_score": 0,
+            "max_score": 0
+        }
+
+    scores = [p.get("score", 0) for p in posts]
+
+    avg_score = sum(scores) / total
+    max_score = max(scores)
+
+    return {
+        "total_posts": total,
+        "avg_score": round(avg_score, 2),
+        "max_score": max_score
+    }
+
+@app.get("/export/text")
+def export_text():
+    posts = list(collection.find({}, {"_id": 0}))
+
+    file_path = "posts.txt"
+
+    with open(file_path, "w") as f:
+        for i, p in enumerate(posts, 1):
+            f.write(f"Post {i}\n")
+            f.write(f"Topic: {p['topic']}\n")
+            f.write(f"Score: {p['score']}\n")
+            f.write(f"{p['post']}\n")
+            f.write("\n" + "-"*40 + "\n\n")
+
+    return FileResponse(file_path, filename="posts.txt")
